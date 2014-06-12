@@ -22,7 +22,6 @@ public class BloodPressureModule implements DeviceInterface
 
 	static final byte[] SYSTEM_SLEEP_COMMAND = new byte[] { (byte) 0xBE,
 			(byte) 0xB0, 0x01, (byte) 0xD0, (byte) 0xAB };
-
 	private static final byte[] HEAD_ID = new byte[] { (byte) 0xD0, (byte) 0xC2 };
 	private static final int MSG_LEN_BYTENUM = 1;
 	private static final int MSG_STATUS_BYTENUM = 1;
@@ -328,5 +327,13 @@ public class BloodPressureModule implements DeviceInterface
 		// TODO Auto-generated method stub
 		mListener = listener;
 	}
+
+	@Override
+	public boolean IsValid()
+	{
+		// TODO Auto-generated method stub
+		return mValid;
+	}
+
 
 }

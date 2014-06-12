@@ -8,4 +8,5 @@ public interface DeviceInterface
 	public boolean IsEnd();
 	public byte[] getStopCommand();
 	public void   setHealthDataListener(HealthDataListener listener);
+	public boolean IsValid();
 } 

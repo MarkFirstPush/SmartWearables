@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import org.healthcare.smartweardevs.commlib.BaseProc;
 import org.healthcare.smartweardevs.devices.DeviceInterface;
+import org.healthcare.smartweardevs.devices.DevicesListener;
 
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
@@ -45,6 +46,11 @@ public class BluetoothManager
 	private static final int BYTE_NUM = 64;
 	private static byte[] mReadBuff = new byte[BYTE_NUM];
 
+	private List<String> mDevFilterList = null;
+	private DevicesListener mDevListener = null;
+
+	private boolean mDiscoveryFin = false;
+
 	private void connectionFailed()
 	{
 		Log.i(TAG, "connectionFailed");
@@ -63,7 +69,7 @@ public class BluetoothManager
 
 		if (null != mCommThread)
 		{
-			if (mCommThread.isAlive()==true)
+			if (mCommThread.isAlive() == true)
 			{
 				Log.i(TAG, "mCommThread alive, need killed");
 				try
@@ -76,13 +82,13 @@ public class BluetoothManager
 					Log.e(TAG, "mCommThread.interrupt exception");
 				}
 			}
-			
+
 			mCommThread.cancel();
 		}
-		
+
 		mCommThread = new CommThread(socket);
 		mCommThread.start();
-		
+
 	}
 
 	private class ConnectThread extends Thread
@@ -149,7 +155,7 @@ public class BluetoothManager
 		}
 
 		public void cancel()
-		{	
+		{
 			try
 			{
 				mmSocket.close();
@@ -231,7 +237,11 @@ public class BluetoothManager
 			// ommit stop-response
 			try
 			{
-				mmInStream.read(mReadBuff);
+				Log.i(TAG, "stop response:");
+				int nRead = mmInStream.read(mReadBuff);
+				Log.i(TAG,
+						"len " + nRead + ":"
+								+ BaseProc.Bytes2HexString(mReadBuff, nRead));
 			}
 			catch (IOException e)
 			{
@@ -288,6 +298,13 @@ public class BluetoothManager
 						mDevIf.reset();
 						break;
 					}
+
+					if (false == mDevIf.IsValid())
+					{
+						Log.i(TAG, "get msg happen error");
+						mDevIf.reset();
+						break;
+					}
 				}
 				catch (IOException e)
 				{
@@ -304,7 +321,9 @@ public class BluetoothManager
 			Log.i(TAG, "conn-socket close!");
 			try
 			{
-				mmOutStream.write(-1);
+				mmOutStream.close();
+				mmInStream.close();
+
 				mmSocket.close();
 			}
 			catch (IOException e)
@@ -324,19 +343,27 @@ public class BluetoothManager
 		{
 
 			String action = intent.getAction();
-			Bundle b = intent.getExtras();
 
-			Object[] lstName = b.keySet().toArray();
-
-			// 显示所有收到的消息及其细节
-			for (int i = 0; i < lstName.length; i++)
+			// b or b.keyset is null when
+			// action:ACTION_DISCOVERY_FINISHED/STARTED
+			/*
+			 * Bundle b = intent.getExtras(); Object[] lstName =
+			 * b.keySet().toArray();
+			 * 
+			 * // 显示所有收到的消息及其细节 for (int i = 0; i < lstName.length; i++) {
+			 * 
+			 * String keyName = lstName[i].toString(); Log.i(TAG + "|" +
+			 * keyName, String.valueOf(b.get(keyName)));
+			 * 
+			 * }
+			 */
+			if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action))
 			{
-
-				String keyName = lstName[i].toString();
-				Log.i(TAG + "|" + keyName, String.valueOf(b.get(keyName)));
+				// finish discovery
+				Log.i(TAG, "bluetooth devices discovery finish!");
+				mDiscoveryFin = true;
 
 			}
-
 			// 搜索远程蓝牙设备时，取得设备的MAC地址
 			if (BluetoothDevice.ACTION_FOUND.equals(action))
 			{
@@ -354,6 +381,29 @@ public class BluetoothManager
 					lstDevices.add(str); // 获取设备名称和mac地址
 					Log.i(TAG, str);
 
+					// for app layer
+					if (null != mDevListener)
+					{
+						if (null == mDevFilterList)
+						{
+							Log.i(TAG, "find " + str);
+							mDevListener.discoveryDev(str);
+						}
+						else
+						{
+							String devName = device.getName();
+							if (-1 != mDevFilterList.indexOf(devName))
+							{
+								Log.i(TAG, "find " + str);
+								mDevListener.discoveryDev(str);
+							}
+
+						}
+					}
+					else
+					{
+						Log.w(TAG, "mDevListener is null");
+					}
 				}
 
 				// 起到更新的效果
@@ -380,7 +430,7 @@ public class BluetoothManager
 	public boolean initMgr()
 	{
 		// 获得BluetoothAdapter对象
-		
+
 		mBluetoothAdt = BluetoothAdapter.getDefaultAdapter();
 		if (null == mBluetoothAdt)
 		{
@@ -426,15 +476,19 @@ public class BluetoothManager
 		}
 
 		// 打开Bluetooth设备 这个无提示效果
+
+		boolean bEnb = mBluetoothAdt.enable();
+		if (false == bEnb)
+		{
+			Log.e(TAG, "mBluetoothAdt enable fail!");
+			return bEnb;
+		}
+
 		/*
-		 * boolean bEnb = mBluetoothAdt.enable(); if (false == bEnb) {
-		 * Log.e(TAG, "mBluetoothAdt enable fail!"); return bEnb; }
+		 * Intent intent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+		 * 
+		 * if (null != mActivityUsed) mActivityUsed.startActivity(intent);
 		 */
-		Intent intent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-
-		if (null != mActivityUsed)
-			mActivityUsed.startActivity(intent);
-
 		return true;
 
 	}
@@ -471,6 +525,8 @@ public class BluetoothManager
 
 	public boolean searchBtDevices()
 	{
+		mDiscoveryFin = false;
+
 		if (mBluetoothAdt == null)
 		{
 
@@ -491,7 +547,7 @@ public class BluetoothManager
 			// 如果蓝牙还没开启
 			Log.e(TAG, "mBluetoothAdt not opened");
 			// use some constant err code: better! for app layer processing
-			 return false;
+			return false;
 		}
 
 		// 注册Receiver来获取蓝牙设备相关的结果 将action指定为：ACTION_FOUND
@@ -501,6 +557,8 @@ public class BluetoothManager
 		intent.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
 		intent.addAction(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
 		intent.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+		intent.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
+		intent.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
 
 		// 注册广播接收器
 		mActivityUsed.registerReceiver(searchDevices, intent);
@@ -521,17 +579,17 @@ public class BluetoothManager
 	 * @throws
 	 */
 	public void communication(String devMAC)
-	{		
+	{
 		Log.i(TAG, "connect to " + devMAC + ": request and get response");
 		BluetoothDevice device = mBluetoothAdt.getRemoteDevice(devMAC);
 		if (null != mConnectThread)
 		{
-			if (mConnectThread.isAlive()==true)
+			if (mConnectThread.isAlive() == true)
 			{
 				Log.i(TAG, "mConnectThread alive, need killed");
 				try
 				{
-				mConnectThread.interrupt();
+					mConnectThread.interrupt();
 				}
 				catch (Exception e)
 				{
@@ -539,7 +597,7 @@ public class BluetoothManager
 					Log.e(TAG, "mConnectThread.interrupt exception");
 				}
 			}
-			
+
 			mConnectThread.cancel();
 		}
 		mConnectThread = new ConnectThread(device);
@@ -611,4 +669,34 @@ public class BluetoothManager
 		mDevIf = devIf;
 	}
 
+	/**
+	 * 
+	 * @Title: setDevicesFilter
+	 * @Description: do devices-discovery filter with DevicesListener
+	 * @param @param filterList
+	 * @return void
+	 * @throws
+	 */
+	public void setDevicesFilter(List<String> filterList)
+	{
+		mDevFilterList = filterList;
+	}
+
+	/**
+	 * 
+	 * @Title: setDevicesListener
+	 * @Description: app layer can get devices discovery with filter or not
+	 * @param @param devListener
+	 * @return void
+	 * @throws
+	 */
+	public void setDevicesListener(DevicesListener devListener)
+	{
+		mDevListener = devListener;
+	}
+
+	public boolean getDiscoveryFin()
+	{
+		return mDiscoveryFin;
+	}
 }
